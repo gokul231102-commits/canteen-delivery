@@ -1,0 +1,39 @@
+# Campus Canteen Food Delivery — Stack & Architecture
+
+## Tech stack
+
+| Layer | Technology | Role |
+|---|---|---|
+| Frontend | Next.js (App Router, React) | Digital menu, cart, checkout, live order tracking, admin dashboard |
+| Real-time | Socket.io | Pushes order status events over WebSocket so screens update with no polling |
+| Backend | Next.js API routes on a custom `server.js` | Order validation, pricing, status transitions |
+| Database | PostgreSQL (`pg`) | Source of truth for `users`, `menu_items`, `orders`, `order_items`, `order_status_history` |
+| Payments | External gateway (UPI/card, e.g. Razorpay/Stripe) | Called server-side only, never directly from the browser |
+| Hosting | Vercel or any Node host + managed Postgres | Deployment target |
+
+## Architecture
+
+The system has three internal tiers and one external dependency:
+
+- **Browser client** — the Next.js UI: menu, cart, order tracking, admin dashboard.
+- **Next.js server** — REST API routes for placing/reading orders, plus a Socket.io layer for real-time status pushes.
+- **PostgreSQL** — durable storage for menu items, orders, and status history.
+- **Payment gateway** *(external)* — called only from the server, so payment credentials never touch the browser.
+
+### Request flow
+
+1. **Browser → server (HTTP)**: loading the menu, placing an order, and fetching an order's state are plain REST calls.
+2. **Browser ↔ server (Socket.io)**: each tab joins a room on load — `order:<id>` for a customer, `admin` for staff — and the server pushes status changes into those rooms directly.
+3. **Server → PostgreSQL**: every order write happens inside a transaction (`BEGIN`/`COMMIT`), and item prices are re-looked-up server-side so a client can never submit its own price.
+4. **Server → payment gateway**: kept server-side to keep card/UPI handling out of the browser.
+
+### Deliverable mapping
+
+| PRD deliverable | Where it lives in the architecture |
+|---|---|
+| Digital menu | Browser client, served by `GET /api/menu` |
+| Cart and order placement | Browser client cart state → `POST /api/orders` → PostgreSQL transaction |
+| Real-time order status | Socket.io channel: server emits `order:status_update` to the customer's `order:<id>` room |
+| Admin order dashboard | Browser client (admin view) joins the `admin` room and receives `order:new` / `order:status_update` live |
+
+This matches the working code in the `campus-canteen-nextjs.zip` project — `server.js` is the middle tier, and `lib/emitOrderEvent.js` is what fires the real-time events shown in the diagram above.
